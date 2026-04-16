@@ -1,0 +1,58 @@
+const dotenv = require("dotenv");
+
+dotenv.config();
+
+const env = {
+  nodeEnv: process.env.NODE_ENV || "development",
+  port: Number(process.env.PORT || 4000),
+  appName: process.env.APP_NAME || "scalable-ecommerce",
+  apiPrefix: process.env.API_PREFIX || "/api/v1",
+  mongoUri: process.env.MONGO_URI || "mongodb://localhost:27017/ecommerce",
+  postgresUrl:
+    process.env.POSTGRES_URL || "postgresql://postgres:postgres@localhost:5432/ecommerce",
+  redisUrl: process.env.REDIS_URL || "redis://localhost:6379",
+  elasticsearchNode: process.env.ELASTICSEARCH_NODE || "http://localhost:9200",
+  jwtAccessSecret: process.env.JWT_ACCESS_SECRET || "access-secret",
+  jwtRefreshSecret: process.env.JWT_REFRESH_SECRET || "refresh-secret",
+  jwtAccessTtl: process.env.JWT_ACCESS_TTL || "15m",
+  jwtRefreshTtl: process.env.JWT_REFRESH_TTL || "7d",
+  googleClientIds: (process.env.GOOGLE_CLIENT_IDS || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean),
+  firebase: {
+    projectId: process.env.FIREBASE_PROJECT_ID || "",
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL || "",
+    privateKey: process.env.FIREBASE_PRIVATE_KEY || "",
+  },
+  razorpay: {
+    keyId: process.env.RAZORPAY_KEY_ID || "",
+    keySecret: process.env.RAZORPAY_KEY_SECRET || "",
+    webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET || "",
+  },
+  commerce: {
+    businessState: process.env.BUSINESS_STATE || "KARNATAKA",
+    referralReferrerBonus: Number(process.env.REFERRAL_REFERRER_BONUS || 100),
+    referralRefereeBonus: Number(process.env.REFERRAL_REFEREE_BONUS || 50),
+    maxWalletUsagePerOrderPercent: Number(process.env.MAX_WALLET_USAGE_PER_ORDER_PERCENT || 30),
+  },
+  socket: {
+    corsOrigin: process.env.SOCKET_CORS_ORIGIN || "*",
+  },
+  smtp: {
+    host: process.env.SMTP_HOST || "localhost",
+    port: Number(process.env.SMTP_PORT || 1025),
+    secure: String(process.env.SMTP_SECURE || "false") === "true",
+    user: process.env.SMTP_USER || "",
+    pass: process.env.SMTP_PASS || "",
+  },
+  defaultFromEmail: process.env.DEFAULT_FROM_EMAIL || "no-reply@example.com",
+  cloudinary: {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME || "",
+    apiKey: process.env.CLOUDINARY_API_KEY || "",
+    apiSecret: process.env.CLOUDINARY_API_SECRET || "",
+  },
+  enableCron: String(process.env.ENABLE_CRON || "true") === "true",
+};
+
+module.exports = { env };

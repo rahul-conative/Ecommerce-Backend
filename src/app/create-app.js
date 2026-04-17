@@ -9,15 +9,17 @@ const { notFoundHandler } = require("../shared/middleware/not-found");
 const { errorHandler } = require("../shared/middleware/error-handler");
 const { connectMongo } = require("../infrastructure/mongo/mongo-client");
 const { connectPostgres } = require("../infrastructure/postgres/postgres-client");
+// const { connectRedis } = require("../infrastructure/redis/redis-client");
 const { registerRoutes } = require("../api/register-routes");
 const { registerWorkers } = require("../workers/register-workers");
 const { registerCronJobs } = require("../infrastructure/cron/register-cron");
 const { auditLog } = require("../shared/middleware/audit-log");
 const { registerRealtimeSubscribers } = require("../infrastructure/realtime/register-realtime");
 const { registerDomainHandlers } = require("../infrastructure/events/register-domain-handlers");
+const { createMetricsMiddleware } = require("../infrastructure/observability/metrics");
 
 async function createApp() {
-  await Promise.all([connectMongo(), connectPostgres()]);
+  await Promise.all([connectMongo(), connectPostgres() ]);
 
   const app = express();
 
@@ -44,6 +46,7 @@ async function createApp() {
   );
   app.use(express.urlencoded({ extended: true }));
   app.use(auditLog);
+  app.use(createMetricsMiddleware); // Track performance metrics
 
   app.get("/health", (req, res) => {
     res.json({ success: true, service: env.appName, status: "ok" });

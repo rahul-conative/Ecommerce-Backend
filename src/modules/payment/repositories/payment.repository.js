@@ -1,4 +1,4 @@
-const { postgresPool } = require("../../../infrastructure/postgres/postgres-client");
+const { knex } = require("../../../infrastructure/postgres/postgres-client");
 const { v4: uuidv4 } = require("uuid");
 const { OutboxRepository } = require("../../../infrastructure/postgres/outbox.repository");
 
@@ -8,120 +8,107 @@ class PaymentRepository {
   }
 
   async createPayment(payload, event) {
-    const client = await postgresPool.connect();
     const payment = {
       id: uuidv4(),
-      ...payload,
-      transactionReference: payload.transactionReference || uuidv4(),
+      order_id: payload.orderId,
+      buyer_id: payload.buyerId,
+      provider: payload.provider,
+      status: payload.status,
+      amount: payload.amount,
+      currency: payload.currency,
+      transaction_reference: payload.transactionReference || uuidv4(),
+      provider_order_id: payload.providerOrderId || null,
+      provider_payment_id: payload.providerPaymentId || null,
+      verification_method: payload.verificationMethod || null,
+      metadata: JSON.stringify(payload.metadata || {}),
+      verified_at: payload.verifiedAt || null,
+      failed_reason: payload.failedReason || null,
     };
 
+    const trx = await knex.transaction();
+
     try {
-      await client.query("BEGIN");
-      await client.query(
-        `INSERT INTO payments (
-          id, order_id, buyer_id, provider, status, amount, currency, transaction_reference,
-          provider_order_id, provider_payment_id, verification_method, metadata, verified_at, failed_reason
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-        [
-          payment.id,
-          payment.orderId,
-          payment.buyerId,
-          payment.provider,
-          payment.status,
-          payment.amount,
-          payment.currency,
-          payment.transactionReference,
-          payment.providerOrderId || null,
-          payment.providerPaymentId || null,
-          payment.verificationMethod || null,
-          JSON.stringify(payment.metadata || {}),
-          payment.verifiedAt || null,
-          payment.failedReason || null,
-        ],
-      );
+      await trx("payments").insert(payment);
 
       if (event) {
-        await this.outboxRepository.enqueue(client, {
+        await this.outboxRepository.enqueue(trx, {
           ...event,
           aggregateId: payment.id,
         });
       }
 
-      await client.query("COMMIT");
+      await trx.commit();
     } catch (error) {
-      await client.query("ROLLBACK");
+      await trx.rollback();
       throw error;
-    } finally {
-      client.release();
     }
 
-    return payment;
+    return {
+      id: payment.id,
+      orderId: payload.orderId,
+      buyerId: payload.buyerId,
+      provider: payload.provider,
+      status: payload.status,
+      amount: payload.amount,
+      currency: payload.currency,
+      transactionReference: payment.transaction_reference,
+      providerOrderId: payload.providerOrderId || null,
+      providerPaymentId: payload.providerPaymentId || null,
+      verificationMethod: payload.verificationMethod || null,
+      metadata: payload.metadata || {},
+      verifiedAt: payload.verifiedAt || null,
+      failedReason: payload.failedReason || null,
+    };
   }
 
   async listPaymentsByBuyer(buyerId) {
-    const { rows } = await postgresPool.query(
-      "SELECT * FROM payments WHERE buyer_id = $1 ORDER BY created_at DESC",
-      [buyerId],
-    );
-    return rows;
+    return knex("payments").where("buyer_id", buyerId).orderBy("created_at", "desc");
   }
 
   async findByOrderId(orderId, buyerId) {
-    const { rows } = await postgresPool.query(
-      "SELECT * FROM payments WHERE order_id = $1 AND buyer_id = $2 ORDER BY created_at DESC LIMIT 1",
-      [orderId, buyerId],
-    );
-    return rows[0] || null;
+    const [payment] = await knex("payments")
+      .where({ order_id: orderId, buyer_id: buyerId })
+      .orderBy("created_at", "desc")
+      .limit(1);
+    return payment || null;
   }
 
   async findByProviderOrderId(providerOrderId) {
-    const { rows } = await postgresPool.query(
-      "SELECT * FROM payments WHERE provider_order_id = $1 ORDER BY created_at DESC LIMIT 1",
-      [providerOrderId],
-    );
-    return rows[0] || null;
+    const [payment] = await knex("payments")
+      .where("provider_order_id", providerOrderId)
+      .orderBy("created_at", "desc")
+      .limit(1);
+    return payment || null;
   }
 
   async updatePaymentStatus(paymentId, payload, event = null) {
-    const client = await postgresPool.connect();
+    const trx = await knex.transaction();
 
     try {
-      await client.query("BEGIN");
-      const { rows } = await client.query(
-        `UPDATE payments
-         SET status = $2,
-             provider_payment_id = COALESCE($3, provider_payment_id),
-             verification_method = COALESCE($4, verification_method),
-             metadata = COALESCE(metadata, '{}'::jsonb) || $5::jsonb,
-             verified_at = COALESCE($6, verified_at),
-             failed_reason = COALESCE($7, failed_reason)
-         WHERE id = $1
-         RETURNING *`,
-        [
-          paymentId,
-          payload.status,
-          payload.providerPaymentId || null,
-          payload.verificationMethod || null,
-          JSON.stringify(payload.metadata || {}),
-          payload.verifiedAt || null,
-          payload.failedReason || null,
-        ],
-      );
+      const [payment] = await trx("payments")
+        .where("id", paymentId)
+        .update({
+          status: payload.status,
+          provider_payment_id: payload.providerPaymentId || knex.raw("COALESCE(provider_payment_id, ?)", [null]),
+          verification_method: payload.verificationMethod || knex.raw("COALESCE(verification_method, ?)", [null]),
+          metadata: knex.raw("COALESCE(metadata, '{}'::jsonb) || ?::jsonb", [JSON.stringify(payload.metadata || {})]),
+          verified_at: payload.verifiedAt || knex.raw("COALESCE(verified_at, ?)", [null]),
+          failed_reason: payload.failedReason || knex.raw("COALESCE(failed_reason, ?)", [null]),
+        })
+        .returning("*");
 
       if (event) {
-        await this.outboxRepository.enqueue(client, {
+        await this.outboxRepository.enqueue(trx, {
           ...event,
           aggregateId: paymentId,
         });
       }
 
-      await client.query("COMMIT");
-      return rows[0] || null;
+      await trx.commit();
+      return payment || null;
     } catch (error) {
-      await client.query("ROLLBACK");
+      await trx.rollback();
       throw error;
-    } finally {
-      client.release();
     }
   }
 }

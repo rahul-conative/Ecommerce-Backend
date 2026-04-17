@@ -1,69 +1,59 @@
-const { postgresPool } = require("./postgres-client");
+const { knex } = require("./postgres-client");
 
 class OutboxRepository {
   async enqueue(client, event) {
-    await client.query(
-      `INSERT INTO outbox_events (id, event_name, aggregate_id, version, payload, occurred_at, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [
-        event.id,
-        event.eventName,
-        event.aggregateId,
-        event.version,
-        JSON.stringify(event.payload),
-        event.occurredAt,
-        "pending",
-      ],
-    );
+    await client("outbox_events").insert({
+      id: event.id,
+      event_name: event.eventName,
+      aggregate_id: event.aggregateId,
+      version: event.version,
+      payload: JSON.stringify(event.payload),
+      occurred_at: event.occurredAt,
+      status: "pending",
+    });
   }
 
   async pullPending(limit = 50) {
-    const client = await postgresPool.connect();
+    const trx = await knex.transaction();
 
     try {
-      await client.query("BEGIN");
-      const { rows } = await client.query(
-        `SELECT id, event_name, aggregate_id, version, payload, occurred_at
-         FROM outbox_events
-         WHERE status = 'pending'
-         ORDER BY occurred_at ASC
-         LIMIT $1
-         FOR UPDATE SKIP LOCKED`,
-        [limit],
-      );
+      const rows = await trx("outbox_events")
+        .select("id", "event_name", "aggregate_id", "version", "payload", "occurred_at")
+        .where("status", "pending")
+        .orderBy("occurred_at", "asc")
+        .limit(limit)
+        .forUpdate()
+        .skipLocked();
 
       if (rows.length) {
-        await client.query(`UPDATE outbox_events SET status = 'processing' WHERE id = ANY($1::uuid[])`, [
-          rows.map((row) => row.id),
-        ]);
+        await trx("outbox_events")
+          .whereIn(
+            "id",
+            rows.map((row) => row.id),
+          )
+          .update({ status: "processing" });
       }
 
-      await client.query("COMMIT");
+      await trx.commit();
       return rows;
     } catch (error) {
-      await client.query("ROLLBACK");
+      await trx.rollback();
       throw error;
-    } finally {
-      client.release();
     }
   }
 
   async markPublished(eventId) {
-    await postgresPool.query(
-      `UPDATE outbox_events
-       SET status = 'published', processed_at = NOW()
-       WHERE id = $1`,
-      [eventId],
-    );
+    await knex("outbox_events").where("id", eventId).update({
+      status: "published",
+      processed_at: knex.fn.now(),
+    });
   }
 
   async markFailed(eventId, errorMessage) {
-    await postgresPool.query(
-      `UPDATE outbox_events
-       SET status = 'failed', last_error = $2
-       WHERE id = $1`,
-      [eventId, errorMessage?.slice(0, 500) || "Unknown outbox failure"],
-    );
+    await knex("outbox_events").where("id", eventId).update({
+      status: "failed",
+      last_error: errorMessage?.slice(0, 500) || "Unknown outbox failure",
+    });
   }
 }
 

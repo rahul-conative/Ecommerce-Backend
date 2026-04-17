@@ -1,182 +1,147 @@
-const { postgresPool } = require("../../../infrastructure/postgres/postgres-client");
+const { knex } = require("../../../infrastructure/postgres/postgres-client");
 const { v4: uuidv4 } = require("uuid");
 
 class WalletRepository {
   async ensureWalletWithClient(client, userId) {
-    const { rows } = await client.query(
-      `INSERT INTO wallets (id, user_id, available_balance, locked_balance)
-       VALUES ($1,$2,0,0)
-       ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
-       RETURNING *`,
-      [uuidv4(), userId],
-    );
-    return rows[0];
+    const [wallet] = await client("wallets")
+      .insert({ id: uuidv4(), user_id: userId, available_balance: 0, locked_balance: 0 })
+      .onConflict("user_id")
+      .merge({ user_id: userId })
+      .returning("*");
+    return wallet;
   }
 
   async ensureWallet(userId) {
-    const { rows } = await postgresPool.query(
-      `INSERT INTO wallets (id, user_id, available_balance, locked_balance)
-       VALUES ($1,$2,0,0)
-       ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
-       RETURNING *`,
-      [uuidv4(), userId],
-    );
-    return rows[0];
+    const [wallet] = await knex("wallets")
+      .insert({ id: uuidv4(), user_id: userId, available_balance: 0, locked_balance: 0 })
+      .onConflict("user_id")
+      .merge({ user_id: userId })
+      .returning("*");
+    return wallet;
   }
 
   async findWalletByUserId(userId) {
-    const { rows } = await postgresPool.query("SELECT * FROM wallets WHERE user_id = $1 LIMIT 1", [userId]);
-    return rows[0] || null;
+    const [wallet] = await knex("wallets").where("user_id", userId).limit(1);
+    return wallet || null;
   }
 
   async creditWallet(userId, amount, meta) {
-    const client = await postgresPool.connect();
+    const trx = await knex.transaction();
+
     try {
-      await client.query("BEGIN");
-      await this.ensureWalletWithClient(client, userId);
-      await client.query(
-        "UPDATE wallets SET available_balance = available_balance + $2 WHERE user_id = $1",
-        [userId, amount],
-      );
-      await client.query(
-        `INSERT INTO wallet_transactions (
-          id, user_id, type, status, amount, reference_type, reference_id, metadata
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [
-          uuidv4(),
-          userId,
-          "credit",
-          "completed",
-          amount,
-          meta.referenceType,
-          meta.referenceId || null,
-          JSON.stringify(meta.metadata || {}),
-        ],
-      );
-      const { rows: walletRows } = await client.query("SELECT * FROM wallets WHERE user_id = $1 LIMIT 1", [userId]);
-      await client.query("COMMIT");
-      return walletRows[0];
+      await this.ensureWalletWithClient(trx, userId);
+      await trx("wallets").where("user_id", userId).increment("available_balance", amount);
+      await trx("wallet_transactions").insert({
+        id: uuidv4(),
+        user_id: userId,
+        type: "credit",
+        status: "completed",
+        amount,
+        reference_type: meta.referenceType,
+        reference_id: meta.referenceId || null,
+        metadata: JSON.stringify(meta.metadata || {}),
+      });
+
+      const [wallet] = await trx("wallets").where("user_id", userId).limit(1);
+      await trx.commit();
+      return wallet;
     } catch (error) {
-      await client.query("ROLLBACK");
+      await trx.rollback();
       throw error;
-    } finally {
-      client.release();
     }
   }
 
   async holdWalletAmount(userId, amount, referenceId, metadata = {}) {
-    const client = await postgresPool.connect();
+    const trx = await knex.transaction();
+
     try {
-      await client.query("BEGIN");
-      await this.ensureWalletWithClient(client, userId);
-      const { rows: walletRows } = await client.query(
-        `UPDATE wallets
-         SET available_balance = available_balance - $2,
-             locked_balance = locked_balance + $2
-         WHERE user_id = $1 AND available_balance >= $2
-         RETURNING *`,
-        [userId, amount],
-      );
-      if (!walletRows[0]) {
+      await this.ensureWalletWithClient(trx, userId);
+      const [wallet] = await trx("wallets")
+        .where("user_id", userId)
+        .andWhere("available_balance", ">=", amount)
+        .update({
+          available_balance: knex.raw("available_balance - ?", [amount]),
+          locked_balance: knex.raw("locked_balance + ?", [amount]),
+        })
+        .returning("*");
+
+      if (!wallet) {
         throw new Error("Insufficient wallet balance");
       }
 
-      await client.query(
-        `INSERT INTO wallet_transactions (
-          id, user_id, type, status, amount, reference_type, reference_id, metadata
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [
-          uuidv4(),
-          userId,
-          "debit",
-          "held",
-          amount,
-          "order",
-          referenceId,
-          JSON.stringify(metadata),
-        ],
-      );
-      await client.query("COMMIT");
-      return walletRows[0];
+      await trx("wallet_transactions").insert({
+        id: uuidv4(),
+        user_id: userId,
+        type: "debit",
+        status: "held",
+        amount,
+        reference_type: "order",
+        reference_id: referenceId,
+        metadata: JSON.stringify(metadata),
+      });
+      await trx.commit();
+      return wallet;
     } catch (error) {
-      await client.query("ROLLBACK");
+      await trx.rollback();
       throw error;
-    } finally {
-      client.release();
     }
   }
 
   async captureHeldAmount(userId, referenceId) {
-    const client = await postgresPool.connect();
+    const trx = await knex.transaction();
+
     try {
-      await client.query("BEGIN");
-      const { rows: heldRows } = await client.query(
-        `SELECT * FROM wallet_transactions
-         WHERE user_id = $1 AND reference_id = $2 AND status = 'held'
-         ORDER BY created_at DESC LIMIT 1`,
-        [userId, referenceId],
-      );
-      const heldTx = heldRows[0];
+      const [heldTx] = await trx("wallet_transactions")
+        .where({ user_id: userId, reference_id: referenceId, status: "held" })
+        .orderBy("created_at", "desc")
+        .limit(1);
+
       if (!heldTx) {
-        await client.query("COMMIT");
+        await trx.commit();
         return null;
       }
 
-      await client.query(
-        "UPDATE wallets SET locked_balance = locked_balance - $2 WHERE user_id = $1",
-        [userId, heldTx.amount],
-      );
-      await client.query("UPDATE wallet_transactions SET status = 'completed' WHERE id = $1", [heldTx.id]);
-      await client.query("COMMIT");
+      await trx("wallets").where("user_id", userId).decrement("locked_balance", heldTx.amount);
+      await trx("wallet_transactions").where("id", heldTx.id).update({ status: "completed" });
+      await trx.commit();
       return heldTx;
     } catch (error) {
-      await client.query("ROLLBACK");
+      await trx.rollback();
       throw error;
-    } finally {
-      client.release();
     }
   }
 
   async releaseHeldAmount(userId, referenceId) {
-    const client = await postgresPool.connect();
+    const trx = await knex.transaction();
+
     try {
-      await client.query("BEGIN");
-      const { rows: heldRows } = await client.query(
-        `SELECT * FROM wallet_transactions
-         WHERE user_id = $1 AND reference_id = $2 AND status = 'held'
-         ORDER BY created_at DESC LIMIT 1`,
-        [userId, referenceId],
-      );
-      const heldTx = heldRows[0];
+      const [heldTx] = await trx("wallet_transactions")
+        .where({ user_id: userId, reference_id: referenceId, status: "held" })
+        .orderBy("created_at", "desc")
+        .limit(1);
+
       if (!heldTx) {
-        await client.query("COMMIT");
+        await trx.commit();
         return null;
       }
 
-      await client.query(
-        `UPDATE wallets
-         SET locked_balance = locked_balance - $2,
-             available_balance = available_balance + $2
-         WHERE user_id = $1`,
-        [userId, heldTx.amount],
-      );
-      await client.query("UPDATE wallet_transactions SET status = 'released' WHERE id = $1", [heldTx.id]);
-      await client.query("COMMIT");
+      await trx("wallets")
+        .where("user_id", userId)
+        .update({
+          locked_balance: knex.raw("locked_balance - ?", [heldTx.amount]),
+          available_balance: knex.raw("available_balance + ?", [heldTx.amount]),
+        });
+      await trx("wallet_transactions").where("id", heldTx.id).update({ status: "released" });
+      await trx.commit();
       return heldTx;
     } catch (error) {
-      await client.query("ROLLBACK");
+      await trx.rollback();
       throw error;
-    } finally {
-      client.release();
     }
   }
 
   async listTransactions(userId) {
-    const { rows } = await postgresPool.query(
-      "SELECT * FROM wallet_transactions WHERE user_id = $1 ORDER BY created_at DESC",
-      [userId],
-    );
-    return rows;
+    return knex("wallet_transactions").where("user_id", userId).orderBy("created_at", "desc");
   }
 }
 

@@ -5,6 +5,8 @@
 ### `users`
 - `referredByUserId` → references another `users._id` (self-referential referral link)
 - `referralCode` → unique code used by `referrals.referralCode`
+- `sellerProfile` → seller onboarding state and support/pickup details for marketplace operations
+- `sellerSettings` → seller fulfillment, return, NDR, and payout configuration
 
 ### `carts`
 - `userId` → references `users._id`
@@ -13,6 +15,8 @@
 
 ### `products`
 - `sellerId` → references `users._id` for the seller account that owns the product
+- `moderation.reviewedBy` → logically references `users._id` of the admin/reviewer
+- `status` drives moderation and visibility (`pending_approval`/`active`/`rejected` etc.)
 
 ### `referrals`
 - `referrerUserId` → references `users._id`
@@ -72,6 +76,20 @@
 ### `outbox_events`
 - `aggregate_id` → polymorphic reference used by domain events
   - can hold `order` id, `payment` id, `user` id, or other aggregate IDs depending on event type
+
+### `tax_invoices`
+- `order_id` → logically references `orders.id`
+- `buyer_id` → logically references `users.id`
+
+### `tax_ledger_entries`
+- `order_id` → logically references `orders.id`
+- `invoice_id` → logically references `tax_invoices.id`
+
+### `vendor_payouts`
+- `seller_id` → logically references `users.id` for seller accounts
+
+### `admin_action_logs`
+- `admin_id` → logically references `users.id` for admin accounts
 
 ## Cross-Database Relationships
 

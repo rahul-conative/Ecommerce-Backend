@@ -10,6 +10,8 @@ const { notificationRoutes } = require("../modules/notification/routes/notificat
 const { analyticsRoutes } = require("../modules/analytics/routes/analytics.routes");
 const { pricingRoutes } = require("../modules/pricing/routes/pricing.routes");
 const { walletRoutes } = require("../modules/wallet/routes/wallet.routes");
+const { adminRoutes } = require("../modules/admin/routes/admin.routes");
+const { taxRoutes } = require("../modules/tax/routes/tax.routes");
 
 function registerRoutes(app) {
   app.use(`${env.apiPrefix}/auth`, authRoutes);
@@ -23,6 +25,8 @@ function registerRoutes(app) {
   app.use(`${env.apiPrefix}/analytics`, analyticsRoutes);
   app.use(`${env.apiPrefix}/pricing`, pricingRoutes);
   app.use(`${env.apiPrefix}/wallets`, walletRoutes);
+  app.use(`${env.apiPrefix}/admin`, adminRoutes);
+  app.use(`${env.apiPrefix}/tax`, taxRoutes);
 }
 
 module.exports = { registerRoutes };

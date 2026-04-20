@@ -10,6 +10,9 @@ const env = {
   mongoUri: process.env.MONGO_URI || "mongodb://localhost:27017/ecommerce",
   postgresUrl:
     process.env.POSTGRES_URL || "postgresql://postgres:postgres@localhost:5432/ecommerce",
+  sequelize: {
+    logging: String(process.env.SEQUELIZE_LOGGING || "false") === "true",
+  },
   redisUrl: process.env.REDIS_URL || "redis://localhost:6379",
   elasticsearchNode: process.env.ELASTICSEARCH_NODE || "http://localhost:9200",
   jwtAccessSecret: process.env.JWT_ACCESS_SECRET || "access-secret",
@@ -32,6 +35,7 @@ const env = {
   },
   commerce: {
     businessState: process.env.BUSINESS_STATE || "KARNATAKA",
+    gstinMarketplace: process.env.GSTIN_MARKETPLACE || "",
     referralReferrerBonus: Number(process.env.REFERRAL_REFERRER_BONUS || 100),
     referralRefereeBonus: Number(process.env.REFERRAL_REFEREE_BONUS || 50),
     maxWalletUsagePerOrderPercent: Number(process.env.MAX_WALLET_USAGE_PER_ORDER_PERCENT || 30),

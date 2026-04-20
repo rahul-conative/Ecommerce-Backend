@@ -124,6 +124,55 @@ class PaymentRepository {
       client.release();
     }
   }
+
+  async listPaymentsForAdmin({
+    status = null,
+    provider = null,
+    buyerId = null,
+    fromDate = null,
+    toDate = null,
+    limit = 50,
+    offset = 0,
+  } = {}) {
+    const values = [];
+    const clauses = [];
+    let index = 1;
+
+    if (status) {
+      clauses.push(`status = $${index++}`);
+      values.push(status);
+    }
+    if (provider) {
+      clauses.push(`provider = $${index++}`);
+      values.push(provider);
+    }
+    if (buyerId) {
+      clauses.push(`buyer_id = $${index++}`);
+      values.push(buyerId);
+    }
+    if (fromDate) {
+      clauses.push(`created_at >= $${index++}`);
+      values.push(fromDate);
+    }
+    if (toDate) {
+      clauses.push(`created_at <= $${index++}`);
+      values.push(toDate);
+    }
+
+    const whereSql = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    values.push(limit, offset);
+
+    const { rows } = await postgresPool.query(
+      `SELECT *
+       FROM payments
+       ${whereSql}
+       ORDER BY created_at DESC
+       LIMIT $${index++}
+       OFFSET $${index}`,
+      values,
+    );
+    return rows;
+  }
 }
 
 module.exports = { PaymentRepository };

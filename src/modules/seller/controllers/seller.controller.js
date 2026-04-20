@@ -18,6 +18,24 @@ class SellerController {
     const kyc = await this.sellerService.reviewKyc(req.params.sellerId, req.body, actor);
     res.json(successResponse(kyc));
   };
+
+  updateProfile = async (req, res) => {
+    const actor = requireActor(req);
+    const profile = await this.sellerService.updateProfile(req.body, actor);
+    res.json(successResponse(profile));
+  };
+
+  updateSettings = async (req, res) => {
+    const actor = requireActor(req);
+    const settings = await this.sellerService.updateSettings(req.body, actor);
+    res.json(successResponse(settings));
+  };
+
+  dashboard = async (req, res) => {
+    const actor = requireActor(req);
+    const dashboard = await this.sellerService.getDashboard(req.query, actor);
+    res.json(successResponse(dashboard));
+  };
 }
 
 module.exports = { SellerController };

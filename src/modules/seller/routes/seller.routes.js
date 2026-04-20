@@ -4,7 +4,13 @@ const { asyncHandler } = require("../../../shared/middleware/async-handler");
 const { authenticate } = require("../../../shared/middleware/authenticate");
 const { authorizeCapability } = require("../../../shared/middleware/authorize");
 const { validateRequest } = require("../../../shared/middleware/validate-request");
-const { submitKycSchema, reviewSellerKycSchema } = require("../validation/seller.validation");
+const {
+  submitKycSchema,
+  reviewSellerKycSchema,
+  updateSellerProfileSchema,
+  updateSellerSettingsSchema,
+  sellerDashboardSchema,
+} = require("../validation/seller.validation");
 const { CAPABILITIES } = require("../../../shared/constants/capabilities");
 
 const sellerRoutes = express.Router();
@@ -23,6 +29,27 @@ sellerRoutes.patch(
   authorizeCapability(CAPABILITIES.KYC_REVIEW),
   validateRequest(reviewSellerKycSchema),
   asyncHandler(sellerController.reviewKyc),
+);
+sellerRoutes.patch(
+  "/me/profile",
+  authenticate,
+  authorizeCapability(CAPABILITIES.SELLER_PROFILE_MANAGE),
+  validateRequest(updateSellerProfileSchema),
+  asyncHandler(sellerController.updateProfile),
+);
+sellerRoutes.patch(
+  "/me/settings",
+  authenticate,
+  authorizeCapability(CAPABILITIES.SELLER_PROFILE_MANAGE),
+  validateRequest(updateSellerSettingsSchema),
+  asyncHandler(sellerController.updateSettings),
+);
+sellerRoutes.get(
+  "/me/dashboard",
+  authenticate,
+  authorizeCapability(CAPABILITIES.SELLER_DASHBOARD_VIEW),
+  validateRequest(sellerDashboardSchema),
+  asyncHandler(sellerController.dashboard),
 );
 
 module.exports = { sellerRoutes };

@@ -6,11 +6,16 @@ const CAPABILITIES = {
   PAYMENT_SELF: "payment:self",
   WALLET_SELF: "wallet:self",
   CATALOG_MANAGE: "catalog:manage",
+  CATALOG_REVIEW: "catalog:review",
   SELLER_KYC_SUBMIT: "seller-kyc:submit",
+  SELLER_DASHBOARD_VIEW: "seller:dashboard:view",
+  SELLER_PROFILE_MANAGE: "seller:profile:manage",
   USER_KYC_SUBMIT: "user-kyc:submit",
   KYC_REVIEW: "kyc:review",
   NOTIFICATION_MANAGE: "notification:manage",
   ANALYTICS_VIEW: "analytics:view",
+  ADMIN_CONTROL: "admin:control",
+  TAX_MANAGE: "tax:manage",
 };
 
 module.exports = { CAPABILITIES };

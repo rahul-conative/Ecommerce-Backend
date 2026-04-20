@@ -117,7 +117,7 @@ class OrderService {
       throw new AppError("Order not found", 404);
     }
 
-    this.assertOrderTransitionAllowed(order, nextStatus, actor);
+    await this.assertOrderTransitionAllowed(orderId, order, nextStatus, actor);
 
     const updatedOrder = await this.orderRepository.updateStatus(orderId, nextStatus);
 
@@ -150,10 +150,13 @@ class OrderService {
     return updatedOrder;
   }
 
-  assertOrderTransitionAllowed(order, nextStatus, actor) {
+  async assertOrderTransitionAllowed(orderId, order, nextStatus, actor) {
     const isOwner = order.buyer_id === actor.userId;
     const isAdmin = actor.role === "admin";
     const isSeller = actor.role === "seller";
+    const isOrderSeller = isSeller
+      ? await this.orderRepository.isSellerInOrder(orderId, actor.userId)
+      : false;
 
     if (nextStatus === ORDER_STATUS.CANCELLED) {
       if (!isOwner && !isAdmin) {
@@ -170,12 +173,18 @@ class OrderService {
       if (!isSeller && !isAdmin) {
         throw new AppError("Only seller or admin can update fulfillment states", 403);
       }
+      if (isSeller && !isOrderSeller) {
+        throw new AppError("You are not allowed to manage this order", 403);
+      }
       return;
     }
 
     if ([ORDER_STATUS.DELIVERED, ORDER_STATUS.RETURN_REQUESTED, ORDER_STATUS.RETURNED].includes(nextStatus)) {
       if (!isOwner && !isSeller && !isAdmin) {
         throw new AppError("You are not allowed to update this order", 403);
+      }
+      if (isSeller && !isOrderSeller) {
+        throw new AppError("You are not allowed to manage this order", 403);
       }
     }
   }

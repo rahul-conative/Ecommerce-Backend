@@ -27,6 +27,12 @@ class ProductController {
     const products = await this.productService.searchProducts(req.query);
     res.json(successResponse(products));
   };
+
+  review = async (req, res) => {
+    const actor = requireActor(req);
+    const product = await this.productService.reviewProduct(req.params.productId, req.body, actor);
+    res.json(successResponse(product));
+  };
 }
 
 module.exports = { ProductController };

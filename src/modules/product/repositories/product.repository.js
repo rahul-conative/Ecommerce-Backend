@@ -70,6 +70,10 @@ class ProductRepository {
   async addStock(productId, quantity) {
     return ProductModel.findByIdAndUpdate(productId, { $inc: { stock: quantity } }, { new: true });
   }
+
+  async reviewProduct(productId, payload) {
+    return ProductModel.findByIdAndUpdate(productId, payload, { new: true });
+  }
 }
 
 module.exports = { ProductRepository };

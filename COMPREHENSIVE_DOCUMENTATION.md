@@ -79,6 +79,37 @@
     lastName: String,
     avatarUrl: String
   },
+  sellerProfile: {
+    displayName: String,
+    legalBusinessName: String,
+    description: String,
+    supportEmail: String,
+    supportPhone: String,
+    pickupAddress: {
+      line1: String,
+      line2: String,
+      city: String,
+      state: String,
+      country: String,
+      postalCode: String
+    },
+    onboardingStatus: String (initiated|in_progress|ready_for_go_live),
+    onboardingChecklist: {
+      profileCompleted: Boolean,
+      kycSubmitted: Boolean,
+      gstVerified: Boolean,
+      bankLinked: Boolean,
+      firstProductPublished: Boolean
+    }
+  },
+  sellerSettings: {
+    autoAcceptOrders: Boolean,
+    handlingTimeHours: Number,
+    returnWindowDays: Number,
+    ndrResponseHours: Number,
+    shippingModes: [String],
+    payoutSchedule: String (daily|weekly|biweekly|monthly)
+  },
   referralCode: String (unique, sparse, indexed),
   referredByUserId: String (indexed),
   emailVerified: Boolean,
@@ -122,7 +153,19 @@
   reservedStock: Number,
   images: [String],
   rating: Number,
-  status: String (draft|active|inactive, indexed),
+  status: String (draft|pending_approval|active|inactive|rejected, indexed),
+  moderation: {
+    submittedAt: Date,
+    reviewedAt: Date,
+    reviewedBy: String,
+    rejectionReason: String,
+    checklist: {
+      titleVerified: Boolean,
+      categoryVerified: Boolean,
+      complianceVerified: Boolean,
+      mediaVerified: Boolean
+    }
+  },
   createdAt: Date,
   updatedAt: Date,
 
@@ -341,6 +384,64 @@ CREATE TABLE wallet_transactions (
 CREATE INDEX idx_wallet_transactions_user_id ON wallet_transactions(user_id, created_at DESC);
 ```
 
+#### **Advanced Finance & Compliance Tables**
+```sql
+CREATE TABLE tax_invoices (
+  id UUID PRIMARY KEY,
+  invoice_number VARCHAR(64) UNIQUE NOT NULL,
+  order_id UUID NOT NULL,
+  buyer_id VARCHAR(64) NOT NULL,
+  taxable_amount NUMERIC(12, 2) DEFAULT 0,
+  tax_amount NUMERIC(12, 2) DEFAULT 0,
+  cgst_amount NUMERIC(12, 2) DEFAULT 0,
+  sgst_amount NUMERIC(12, 2) DEFAULT 0,
+  igst_amount NUMERIC(12, 2) DEFAULT 0,
+  tcs_amount NUMERIC(12, 2) DEFAULT 0,
+  total_amount NUMERIC(12, 2) DEFAULT 0,
+  currency VARCHAR(8) DEFAULT 'INR',
+  tax_mode VARCHAR(32) NOT NULL,
+  gstin_marketplace VARCHAR(32),
+  gstin_seller VARCHAR(32),
+  place_of_supply VARCHAR(64),
+  issued_at TIMESTAMPTZ NOT NULL,
+  metadata JSONB DEFAULT '{}',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE tax_ledger_entries (
+  id UUID PRIMARY KEY,
+  order_id UUID NOT NULL,
+  invoice_id UUID,
+  entry_type VARCHAR(32) NOT NULL,
+  tax_component VARCHAR(16) NOT NULL, -- cgst|sgst|igst|tcs
+  amount NUMERIC(12, 2) NOT NULL,
+  currency VARCHAR(8) DEFAULT 'INR',
+  reference_type VARCHAR(32) NOT NULL,
+  reference_id VARCHAR(64) NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE vendor_payouts (
+  id UUID PRIMARY KEY,
+  seller_id VARCHAR(64) NOT NULL,
+  period_start TIMESTAMPTZ NOT NULL,
+  period_end TIMESTAMPTZ NOT NULL,
+  gross_amount NUMERIC(12, 2) NOT NULL,
+  commission_amount NUMERIC(12, 2) DEFAULT 0,
+  processing_fee_amount NUMERIC(12, 2) DEFAULT 0,
+  tax_withheld_amount NUMERIC(12, 2) DEFAULT 0,
+  net_payout_amount NUMERIC(12, 2) NOT NULL,
+  currency VARCHAR(8) DEFAULT 'INR',
+  status VARCHAR(32) DEFAULT 'scheduled', -- scheduled|processing|paid|failed
+  scheduled_at TIMESTAMPTZ DEFAULT NOW(),
+  processed_at TIMESTAMPTZ,
+  metadata JSONB DEFAULT '{}',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
 #### **outbox_events Table** (Transactional Outbox Pattern)
 ```sql
 CREATE TABLE outbox_events (
@@ -482,6 +583,7 @@ CREATE INDEX idx_outbox_events_status_occurred_at ON outbox_events(status, occur
 
 #### `GET /products`
 - **Query Parameters**: `{ "page": 1, "limit": 20, "category": "electronics", "status": "active" }`
+- **Default Visibility**: Returns only `active` products if `status` is not explicitly passed
 - **Response**: `200 OK`
   ```json
   {
@@ -530,7 +632,29 @@ CREATE INDEX idx_outbox_events_status_occurred_at ON outbox_events(status, occur
   }
   ```
 - **Response**: `201 Created`
-- **Action**: Indexes product in Elasticsearch
+- **Seller Workflow**: Seller-created products are saved as `pending_approval`
+- **Action**: Indexes product in Elasticsearch only when status is `active`
+
+#### `PATCH /products/:productId/review`
+- **Authentication**: Required
+- **Authorization Capability**: `CATALOG_REVIEW` (admin via wildcard capability)
+- **Request Body**:
+  ```json
+  {
+    "status": "active|inactive|rejected",
+    "rejectionReason": "Optional reason",
+    "checklist": {
+      "titleVerified": true,
+      "categoryVerified": true,
+      "complianceVerified": true,
+      "mediaVerified": true
+    }
+  }
+  ```
+- **Response**: `200 OK`
+- **Action**:
+  - Activates and indexes approved products
+  - Removes rejected/inactive products from Elasticsearch index
 
 ### **Cart Endpoints**
 
@@ -777,6 +901,98 @@ Seller/Admin can update fulfillment states (packed, shipped, fulfilled)
 - **Response**: `200 OK`
 - **Event**: `KYC_STATUS_UPDATED_V1`
 
+#### `PATCH /sellers/me/profile`
+- **Authentication**: Required
+- **Authorization Capability**: `SELLER_PROFILE_MANAGE`
+- **Request Body**: Seller store profile, support contacts, pickup address, onboarding checklist
+- **Response**: `200 OK`
+- **Behavior**: Auto-updates onboarding progression and GST verification marker from seller KYC
+
+#### `PATCH /sellers/me/settings`
+- **Authentication**: Required
+- **Authorization Capability**: `SELLER_PROFILE_MANAGE`
+- **Request Body**:
+  ```json
+  {
+    "autoAcceptOrders": false,
+    "handlingTimeHours": 24,
+    "returnWindowDays": 7,
+    "ndrResponseHours": 24,
+    "shippingModes": ["standard", "express"],
+    "payoutSchedule": "weekly"
+  }
+  ```
+- **Response**: `200 OK`
+
+#### `GET /sellers/me/dashboard`
+- **Authentication**: Required
+- **Authorization Capability**: `SELLER_DASHBOARD_VIEW`
+- **Query**: `fromDate`, `toDate` (ISO, optional; defaults to last 30 days)
+- **Response**: `200 OK`
+- **Includes**: Onboarding status, KYC status, GMV, delivered revenue, cancellation/return counts, top products, recent orders
+
+### **Admin Control Endpoints**
+
+#### `GET /admin/dashboard/overview`
+- **Authentication**: Required (admin)
+- **Response**: Marketplace KPIs (users, sellers, catalog, orders, GMV, collections)
+
+#### `GET /admin/vendors`
+- **Authentication**: Required (admin)
+- **Query**: `q`, `status`, `page`, `limit`
+- **Response**: Seller onboarding/compliance list
+
+#### `PATCH /admin/vendors/:sellerId/status`
+- **Authentication**: Required (admin)
+- **Request Body**: `{ "accountStatus": "active|suspended" }`
+- **Response**: Updated seller account state
+
+#### `GET /admin/products/moderation-queue`
+- **Authentication**: Required (admin)
+- **Query**: `status`, `category`, `page`, `limit`
+- **Response**: Product moderation queue
+
+#### `PATCH /admin/products/:productId/moderate`
+- **Authentication**: Required (admin)
+- **Request Body**: `{ "status": "active|inactive|rejected", "rejectionReason": "...", "checklist": {...} }`
+- **Response**: Moderated product
+
+#### `GET /admin/orders`
+- **Authentication**: Required (admin)
+- **Query**: `status`, `fromDate`, `toDate`, `limit`, `offset`
+
+#### `GET /admin/payments`
+- **Authentication**: Required (admin)
+- **Query**: `status`, `provider`, `fromDate`, `toDate`, `limit`, `offset`
+
+#### `POST /admin/payouts`
+- **Authentication**: Required (admin)
+- **Request Body**: Seller payout schedule payload with gross/commission/tax/net breakup
+- **Response**: Created payout schedule
+
+#### `GET /admin/payouts`
+- **Authentication**: Required (admin)
+- **Query**: `sellerId`, `status`, `fromDate`, `toDate`, `limit`, `offset`
+
+#### `GET /admin/tax/reports`
+- **Authentication**: Required (admin)
+- **Query**: `fromDate`, `toDate`, `taxComponent`, `limit`, `offset`
+- **Response**: GST component-wise ledger summary
+
+#### `POST /admin/tax/orders/:orderId/invoice`
+- **Authentication**: Required (admin)
+- **Response**: Generated GST invoice + ledger entries
+
+### **Tax Endpoints**
+
+#### `POST /tax/orders/:orderId/invoice`
+- **Authentication**: Required (admin)
+- **Response**: GST-compliant invoice generation for order
+
+#### `GET /tax/reports`
+- **Authentication**: Required (admin)
+- **Response**: Tax component summary report
+
 ### **Notification Endpoints**
 
 #### `GET /notifications/me`
@@ -860,10 +1076,14 @@ module/
 #### **3. PRODUCT Module**
 - **Database**: MongoDB (products), Elasticsearch (search index)
 - **Key Services**:
-  - `createProduct()`: Create product, index in Elasticsearch
+  - `createProduct()`: Create product with approval workflow
   - `listProducts()`: Paginated listing with caching (60s)
   - `getProduct()`: Single product details
   - `searchProducts()`: Full-text search on Elasticsearch
+  - `reviewProduct()`: Admin moderation (activate/reject/inactivate)
+- **Catalog Moderation**:
+  - Seller-created listings are pushed to `pending_approval`
+  - Only `active` listings are indexed and shown by default
 - **Search Fields**: title^3 (boosted), category, description
 - **GST Calculation**: Based on product GST rate
 - **Stock Management**: `stock - reservedStock = availableStock`
@@ -985,12 +1205,16 @@ module/
 - **Events**: `NOTIFICATION_CREATED_V1`
 
 #### **11. SELLER Module**
-- **Database**: PostgreSQL (seller_kyc)
+- **Database**: PostgreSQL (`seller_kyc`, order aggregation), MongoDB (`users.sellerProfile`, `users.sellerSettings`)
 - **Key Services**:
   - `submitKyc()`: Seller KYC submission (PAN, GST, documents)
   - `reviewKyc()`: Admin verification
+  - `updateProfile()`: Seller onboarding profile and pickup/support data
+  - `updateSettings()`: Fulfillment/payout operations configuration
+  - `getDashboard()`: Seller KPI dashboard and top-product analytics
 - **KYC Fields**: PAN, GST Number, Aadhaar, Legal Name, Business Type, Documents
 - **KYC Statuses**: draft → submitted → under_review → verified/rejected
+- **Seller Analytics**: GMV, delivered revenue, cancellation and return counts, AOV, recent orders
 - **Events**: `SELLER_KYC_SUBMITTED_V1`, `KYC_STATUS_UPDATED_V1`
 
 #### **12. ANALYTICS Module**
@@ -1001,7 +1225,25 @@ module/
 - **Aggregation**: Ready for daily/monthly aggregation cron job
 - **Event Tracking**: User actions, conversions, revenue metrics
 
-#### **13. REFERRAL Module**
+#### **13. ADMIN Module**
+- **Database**: MongoDB + PostgreSQL
+- **Key Services**:
+  - `getOverview()`: Marketplace KPI snapshot
+  - `listVendors()` / `updateVendorStatus()`: Vendor lifecycle controls
+  - `listProductModerationQueue()` / `moderateProduct()`: Catalog governance
+  - `listOrders()` / `listPayments()`: Full operational oversight
+  - `createPayout()` / `listPayouts()`: Settlement scheduling and tracking
+  - `generateInvoice()` / `getTaxReport()`: Compliance operations
+
+#### **14. TAX Module**
+- **Database**: PostgreSQL (`tax_invoices`, `tax_ledger_entries`, `gst_filings`)
+- **Key Services**:
+  - `generateInvoice()`: GST invoice generation with CGST/SGST/IGST/TCS support
+  - `getTaxReport()`: Component-wise tax ledger reporting
+- **Tax Components**: CGST, SGST, IGST, TCS
+- **Use Cases**: GSTR-8 preparation, audit trail, reconciliation
+
+#### **15. REFERRAL Module**
 - **Database**: MongoDB (referral records)
 - **Key Services**:
   - `resolveReferrer()`: Validate referral code

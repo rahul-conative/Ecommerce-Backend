@@ -38,4 +38,23 @@ const searchProductSchema = Joi.object({
   params: Joi.object({}).required(),
 });
 
-module.exports = { createProductSchema, listProductSchema, searchProductSchema };
+const reviewProductSchema = Joi.object({
+  body: Joi.object({
+    status: Joi.string()
+      .valid(PRODUCT_STATUS.ACTIVE, PRODUCT_STATUS.INACTIVE, PRODUCT_STATUS.REJECTED)
+      .required(),
+    rejectionReason: Joi.string().max(500).allow("", null),
+    checklist: Joi.object({
+      titleVerified: Joi.boolean(),
+      categoryVerified: Joi.boolean(),
+      complianceVerified: Joi.boolean(),
+      mediaVerified: Joi.boolean(),
+    }).default({}),
+  }).required(),
+  query: Joi.object({}).required(),
+  params: Joi.object({
+    productId: Joi.string().required(),
+  }).required(),
+});
+
+module.exports = { createProductSchema, listProductSchema, searchProductSchema, reviewProductSchema };

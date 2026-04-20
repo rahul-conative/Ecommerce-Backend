@@ -8,6 +8,7 @@ const {
   createProductSchema,
   listProductSchema,
   searchProductSchema,
+  reviewProductSchema,
 } = require("../validation/product.validation");
 const { CAPABILITIES } = require("../../../shared/constants/capabilities");
 
@@ -16,6 +17,13 @@ const productController = new ProductController();
 
 productRoutes.get("/", validateRequest(listProductSchema), asyncHandler(productController.list));
 productRoutes.get("/search", validateRequest(searchProductSchema), asyncHandler(productController.search));
+productRoutes.patch(
+  "/:productId/review",
+  authenticate,
+  authorizeCapability(CAPABILITIES.CATALOG_REVIEW),
+  validateRequest(reviewProductSchema),
+  asyncHandler(productController.review),
+);
 productRoutes.get("/:productId", asyncHandler(productController.getOne));
 productRoutes.post(
   "/",

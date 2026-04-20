@@ -17,6 +17,18 @@ const productSchema = new mongoose.Schema(
     images: [{ type: String }],
     rating: { type: Number, default: 0 },
     status: { type: String, default: "draft", index: true },
+    moderation: {
+      submittedAt: { type: Date },
+      reviewedAt: { type: Date },
+      reviewedBy: { type: String },
+      rejectionReason: { type: String },
+      checklist: {
+        titleVerified: { type: Boolean, default: false },
+        categoryVerified: { type: Boolean, default: false },
+        complianceVerified: { type: Boolean, default: false },
+        mediaVerified: { type: Boolean, default: false },
+      },
+    },
   },
   { timestamps: true },
 );
